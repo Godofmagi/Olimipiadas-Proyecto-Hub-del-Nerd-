@@ -1,26 +1,9 @@
-"""
-tienda_comics.py
-Sistema de administración de una tienda de cómics.
-E.E.S.T. N°6 "Chacabuco" - Olimpiadas Institucionales 2026.
 
-Basado en el esquema real de la base 'tienda_comics' (tablas
-articulos y categorias). Sigue el mismo nivel de complejidad que
-el ejemplo oficial del "Maxikiosco": funciones simples, cada una
-con una responsabilidad concreta, ordenamiento y filtrado resueltos
-con SQL, y una única función recursiva aplicada a algo real
-(calcular el valor total del inventario).
-
-Ejecutar la aplicación:       python3 tienda_comics.py
-Ejecutar los casos de prueba:  python3 tienda_comics.py test
-"""
 import sys
 import unittest
 
 import mysql.connector
 
-# ------------------------------------------------------------
-# Datos de conexión (completar con los propios)
-# ------------------------------------------------------------
 DB_HOST = "localhost"
 DB_USER = "root"
 DB_PASSWORD = ""
@@ -34,10 +17,6 @@ def conectar():
         host=DB_HOST, user=DB_USER, password=DB_PASSWORD, database=DB_NAME
     )
 
-
-# ------------------------------------------------------------
-# Validación (control de datos inválidos)
-# ------------------------------------------------------------
 def validar_articulo(codigo, nombre, precio, stock):
     if not codigo.strip():
         raise ValueError("El código no puede estar vacío.")
@@ -54,9 +33,7 @@ def codigo_ya_existe(cursor, codigo):
     return cursor.fetchone() is not None
 
 
-# ------------------------------------------------------------
-# Mostrar categorías (ayuda para saber qué Id_C usar al registrar)
-# ------------------------------------------------------------
+
 def mostrar_categorias():
     conexion = conectar()
     cursor = conexion.cursor()
@@ -67,9 +44,6 @@ def mostrar_categorias():
     conexion.close()
 
 
-# ------------------------------------------------------------
-# Registrar (alta)
-# ------------------------------------------------------------
 def registrar_articulo():
     conexion = conectar()
     cursor = conexion.cursor()
@@ -99,10 +73,35 @@ def registrar_articulo():
         cursor.close()
         conexion.close()
 
+def registrar_categoria():
+    conexion = conectar()
+    cursor = conexion.cursor()
 
-# ------------------------------------------------------------
-# Mostrar todos
-# ------------------------------------------------------------
+    id_articulo = int(input("ID de artículo: "))
+    codigo = input("Código: ")
+    nombre = input("Título: ")
+    precio = float(input("Precio: "))
+    stock = int(input("Stock: "))
+
+    try:
+        validar_articulo(codigo, nombre, precio, stock)
+        if codigo_ya_existe(cursor, codigo):
+            print("Ya existe un artículo con ese código.")
+            return
+
+        cursor.execute(
+            "INSERT INTO articulos (Id_C, codigo, nombre_titulo, precio, stock) "
+            "VALUES (%s, %s, %s, %s, %s)",
+            (id_articulo, codigo, nombre, precio, stock),
+        )
+        conexion.commit()
+        print("Artículo registrado correctamente.")
+    except ValueError as e:
+        print("Error de validación:", e)
+    finally:
+        cursor.close()
+        conexion.close()
+
 def mostrar_articulos():
     conexion = conectar()
     cursor = conexion.cursor()
@@ -117,10 +116,6 @@ def mostrar_articulos():
     cursor.close()
     conexion.close()
 
-
-# ------------------------------------------------------------
-# Buscar por código
-# ------------------------------------------------------------
 def buscar_articulo():
     codigo = input("Código a buscar: ")
     conexion = conectar()
@@ -144,10 +139,6 @@ def buscar_articulo():
     cursor.close()
     conexion.close()
 
-
-# ------------------------------------------------------------
-# Modificar (precio y stock)
-# ------------------------------------------------------------
 def modificar_articulo():
     codigo = input("Código del artículo a modificar: ")
     nuevo_precio = float(input("Nuevo precio: "))
@@ -169,10 +160,6 @@ def modificar_articulo():
     cursor.close()
     conexion.close()
 
-
-# ------------------------------------------------------------
-# Eliminar
-# ------------------------------------------------------------
 def eliminar_articulo():
     codigo = input("Código del artículo a eliminar: ")
     confirmar = input(f"¿Confirma eliminar '{codigo}'? (s/n): ").lower()
@@ -193,10 +180,6 @@ def eliminar_articulo():
     cursor.close()
     conexion.close()
 
-
-# ------------------------------------------------------------
-# Ordenar (resuelto directamente con SQL, sin código extra)
-# ------------------------------------------------------------
 def ordenar_articulos():
     orden = input("Ordenar por (1) precio o (2) título: ")
     campo = "precio" if orden == "1" else "nombre_titulo"
@@ -212,10 +195,6 @@ def ordenar_articulos():
     cursor.close()
     conexion.close()
 
-
-# ------------------------------------------------------------
-# Filtrar por categoría (JOIN porque la categoría es otra tabla)
-# ------------------------------------------------------------
 def filtrar_articulos():
     categoria = input("Ingrese el nombre de la categoría: ")
 
@@ -236,11 +215,6 @@ def filtrar_articulos():
     cursor.close()
     conexion.close()
 
-
-# ------------------------------------------------------------
-# RECURSIVIDAD: valor total del inventario (precio * stock, sumado
-# recursivamente sobre la lista de artículos)
-# ------------------------------------------------------------
 def obtener_precios_y_stock():
     conexion = conectar()
     cursor = conexion.cursor()
@@ -257,10 +231,6 @@ def calcular_valor_inventario(datos, posicion=0):
     precio, stock = datos[posicion]
     return float(precio) * stock + calcular_valor_inventario(datos, posicion + 1)
 
-
-# ------------------------------------------------------------
-# Menú principal
-# ------------------------------------------------------------
 def menu():
     while True:
         print("\n==============================")
@@ -304,10 +274,6 @@ def menu():
         else:
             print("Opción incorrecta.")
 
-
-# ------------------------------------------------------------
-# Casos de prueba (no requieren conexión real a la base)
-# ------------------------------------------------------------
 class TestValidaciones(unittest.TestCase):
     def test_precio_invalido(self):
         with self.assertRaises(ValueError):
