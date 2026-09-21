@@ -2,7 +2,8 @@
 app.py
 Sistema de administración de una tienda de cómics — versión con
 interfaz gráfica (CustomTkinter) sobre base de datos SQLite, con
-soporte para adjuntar una imagen a cada artículo.
+soporte para adjuntar una imagen a cada artículo, y con módulos de
+clientes, vendedores y ventas (con su detalle).
 E.E.S.T. N°6 "Chacabuco" - Olimpiadas Institucionales 2026.
 
 Las imágenes que se adjuntan al registrar un artículo se copian a
@@ -20,6 +21,7 @@ import shutil
 import sqlite3
 import unittest
 import tempfile
+from datetime import datetime
 
 # Rutas absolutas calculadas a partir de la ubicación de este
 # archivo (no del directorio desde donde se ejecute la terminal),
@@ -207,6 +209,206 @@ def calcular_valor_inventario(datos, posicion=0):
     return float(precio) * stock + calcular_valor_inventario(datos, posicion + 1)
 
 
+# ------------------------------------------------------------
+# Vendedores
+# ------------------------------------------------------------
+TURNOS_VALIDOS = ("mañana", "tarde", "noche")
+
+
+def validar_vendedor(legajo, nombre, apellido, turno):
+    if not legajo.strip():
+        raise ValueError("El legajo no puede estar vacío.")
+    if not nombre.strip():
+        raise ValueError("El nombre no puede estar vacío.")
+    if not apellido.strip():
+        raise ValueError("El apellido no puede estar vacío.")
+    if turno not in TURNOS_VALIDOS:
+        raise ValueError("El turno debe ser mañana, tarde o noche.")
+
+
+def registrar_vendedor(legajo, nombre, apellido, turno):
+    validar_vendedor(legajo, nombre, apellido, turno)
+    conexion = conectar()
+    cursor = conexion.cursor()
+    cursor.execute(
+        "INSERT INTO vendedores (legajo, nombre, apellido, turno) VALUES (?, ?, ?, ?)",
+        (legajo.strip(), nombre.strip(), apellido.strip(), turno),
+    )
+    conexion.commit()
+    conexion.close()
+
+
+def listar_vendedores():
+    conexion = conectar()
+    cursor = conexion.cursor()
+    cursor.execute(
+        "SELECT id, legajo, nombre, apellido, turno FROM vendedores ORDER BY apellido, nombre"
+    )
+    datos = cursor.fetchall()
+    conexion.close()
+    return datos
+
+
+# ------------------------------------------------------------
+# Clientes (hacen falta para poder registrar una venta)
+# ------------------------------------------------------------
+def validar_cliente(dni, nombre, apellido, email, telefono):
+    if not dni.strip():
+        raise ValueError("El DNI no puede estar vacío.")
+    if not nombre.strip():
+        raise ValueError("El nombre no puede estar vacío.")
+    if not apellido.strip():
+        raise ValueError("El apellido no puede estar vacío.")
+    # El email y el teléfono son opcionales, pero si se cargan el
+    # email tiene que parecer un email.
+    if email.strip() and "@" not in email:
+        raise ValueError("El email no es válido.")
+
+
+def registrar_cliente(dni, nombre, apellido, email="", telefono=""):
+    validar_cliente(dni, nombre, apellido, email, telefono)
+    conexion = conectar()
+    cursor = conexion.cursor()
+    cursor.execute(
+        "INSERT INTO clientes (dni, nombre, apellido, email, telefono) VALUES (?, ?, ?, ?, ?)",
+        (dni.strip(), nombre.strip(), apellido.strip(), email.strip(), telefono.strip()),
+    )
+    conexion.commit()
+    conexion.close()
+
+
+def listar_clientes():
+    conexion = conectar()
+    cursor = conexion.cursor()
+    cursor.execute(
+        "SELECT id, dni, nombre, apellido, email, telefono FROM clientes ORDER BY apellido, nombre"
+    )
+    datos = cursor.fetchall()
+    conexion.close()
+    return datos
+
+
+def buscar_cliente_por_dni(dni):
+    """Devuelve la fila del cliente con ese DNI, o None si no existe.
+    Se usa en la pantalla combinada de 'Nueva venta' para saber si un
+    cliente ya estaba registrado (y así no duplicarlo) o si hay que
+    darlo de alta."""
+    conexion = conectar()
+    cursor = conexion.cursor()
+    cursor.execute(
+        "SELECT id, dni, nombre, apellido, email, telefono FROM clientes WHERE dni = ?",
+        (dni.strip(),),
+    )
+    cliente = cursor.fetchone()
+    conexion.close()
+    return cliente
+
+
+# ------------------------------------------------------------
+# Ventas y detalle de ventas
+# ------------------------------------------------------------
+def registrar_venta(id_cliente, id_vendedor, items):
+    """Registra una venta completa. 'items' es una lista de tuplas
+    (id_articulo, cantidad). Todo ocurre dentro de UNA sola
+    transacción: se crea la venta, se cargan sus renglones en
+    detalle_ventas, se descuenta el stock y se guarda el total. Si
+    algo falla (por ejemplo, no alcanza el stock de un artículo) se
+    deshace todo y no queda nada a medias en la base.
+    Devuelve el id de la venta creada."""
+    if not items:
+        raise ValueError("La venta no tiene artículos.")
+
+    conexion = conectar()
+    try:
+        cursor = conexion.cursor()
+        fecha = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "INSERT INTO ventas (Id_CL, Id_V, fecha_hora, monto_total) VALUES (?, ?, ?, 0)",
+            (id_cliente, id_vendedor, fecha),
+        )
+        id_venta = cursor.lastrowid
+
+        total = 0.0
+        for id_articulo, cantidad in items:
+            if cantidad <= 0:
+                raise ValueError("La cantidad debe ser mayor a 0.")
+            cursor.execute(
+                "SELECT nombre_titulo, precio, stock FROM articulos WHERE id = ?",
+                (id_articulo,),
+            )
+            fila = cursor.fetchone()
+            if fila is None:
+                raise ValueError("Uno de los artículos ya no existe.")
+            nombre, precio, stock = fila
+            if cantidad > stock:
+                raise ValueError(
+                    f"Stock insuficiente de '{nombre}' (disponible: {stock})."
+                )
+            subtotal = round(float(precio) * cantidad, 2)
+            cursor.execute(
+                "INSERT INTO detalle_ventas (Id_VE, Id_A, cantidad, precio_unitario, subtotal) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (id_venta, id_articulo, cantidad, precio, subtotal),
+            )
+            cursor.execute(
+                "UPDATE articulos SET stock = stock - ? WHERE id = ?",
+                (cantidad, id_articulo),
+            )
+            total += subtotal
+
+        cursor.execute(
+            "UPDATE ventas SET monto_total = ? WHERE id = ?", (round(total, 2), id_venta)
+        )
+        conexion.commit()
+        return id_venta
+    except Exception:
+        conexion.rollback()
+        raise
+    finally:
+        conexion.close()
+
+
+def listar_ventas():
+    """Devuelve las ventas (la más nueva primero) con los datos del
+    cliente y del vendedor. El detalle de cada una se pide aparte
+    con obtener_detalle_venta()."""
+    conexion = conectar()
+    cursor = conexion.cursor()
+    cursor.execute(
+        """
+        SELECT v.id, v.fecha_hora,
+               c.nombre || ' ' || c.apellido, c.dni,
+               ve.nombre || ' ' || ve.apellido, ve.legajo,
+               v.monto_total
+        FROM ventas v
+        JOIN clientes c ON v.Id_CL = c.id
+        JOIN vendedores ve ON v.Id_V = ve.id
+        ORDER BY v.id DESC
+        """
+    )
+    datos = cursor.fetchall()
+    conexion.close()
+    return datos
+
+
+def obtener_detalle_venta(id_venta):
+    conexion = conectar()
+    cursor = conexion.cursor()
+    cursor.execute(
+        """
+        SELECT a.codigo, a.nombre_titulo, d.cantidad, d.precio_unitario, d.subtotal
+        FROM detalle_ventas d
+        JOIN articulos a ON d.Id_A = a.id
+        WHERE d.Id_VE = ?
+        ORDER BY d.id
+        """,
+        (id_venta,),
+    )
+    datos = cursor.fetchall()
+    conexion.close()
+    return datos
+
+
 # ==============================================================
 # INTERFAZ GRÁFICA (CustomTkinter)
 # ==============================================================
@@ -250,21 +452,17 @@ def iniciar_interfaz():
                 barra, text="TIENDA DE\nCÓMICS", font=ctk.CTkFont(size=20, weight="bold")
             ).pack(pady=(25, 20))
 
-            botones = [
-                ("Listar artículos", self.accion_listar),
-                ("Registrar artículo", self.abrir_registrar),
-                ("Buscar por código", self.abrir_buscar),
-                ("Modificar artículo", self.abrir_modificar),
-                ("Eliminar artículo", self.abrir_eliminar),
-                ("Ordenar artículos", self.abrir_ordenar),
-                ("Filtrar por categoría", self.abrir_filtrar),
-                ("Valor del inventario", self.accion_valor_inventario),
-                ("Ver categorías", self.accion_categorias),
-            ]
-            for texto, comando in botones:
-                ctk.CTkButton(barra, text=texto, command=comando).pack(
-                    padx=15, pady=6, fill="x"
-                )
+            # ---- Barra lateral: un botón por grupo de funciones ----
+            # Cada botón abre su propio menú.
+            ctk.CTkButton(
+                barra, text="Artículos", command=self.abrir_menu_articulos
+            ).pack(padx=15, pady=6, fill="x")
+            ctk.CTkButton(
+                barra, text="Vendedores", command=self.abrir_menu_vendedores
+            ).pack(padx=15, pady=6, fill="x")
+            ctk.CTkButton(
+                barra, text="Ventas y Clientes", command=self.abrir_menu_ventas_clientes
+            ).pack(padx=15, pady=6, fill="x")
 
             # ---- Área principal: panel de tarjetas (imagen + texto) ----
             self.area_resultados = ctk.CTkScrollableFrame(self)
@@ -323,6 +521,38 @@ def iniciar_interfaz():
                 ctk.CTkLabel(
                     fila, text=texto, font=ctk.CTkFont(size=14), justify="left", anchor="w",
                 ).pack(side="left", padx=10, pady=10, fill="x", expand=True)
+
+        # ---- Menú del grupo "Artículos" ----
+        def abrir_menu_articulos(self):
+            ventana = ctk.CTkToplevel(self)
+            ventana.title("Artículos")
+            ventana.geometry("260x460")
+            ventana.grab_set()
+
+            ctk.CTkLabel(
+                ventana, text="ARTÍCULOS", font=ctk.CTkFont(size=16, weight="bold")
+            ).pack(pady=(20, 10))
+
+            opciones = [
+                ("Listar artículos", self.accion_listar),
+                ("Registrar artículo", self.abrir_registrar),
+                ("Buscar por código", self.abrir_buscar),
+                ("Modificar artículo", self.abrir_modificar),
+                ("Eliminar artículo", self.abrir_eliminar),
+                ("Ordenar artículos", self.abrir_ordenar),
+                ("Filtrar por categoría", self.abrir_filtrar),
+                ("Valor del inventario", self.accion_valor_inventario),
+                ("Ver categorías", self.accion_categorias),
+            ]
+
+            def ejecutar(funcion):
+                ventana.destroy()
+                funcion()
+
+            for texto, funcion in opciones:
+                ctk.CTkButton(
+                    ventana, text=texto, command=lambda f=funcion: ejecutar(f)
+                ).pack(padx=15, pady=5, fill="x")
 
         # ---- Acciones directas (no necesitan formulario) ----
         def accion_listar(self):
@@ -472,7 +702,14 @@ def iniciar_interfaz():
                 codigo = entry_codigo.get()
                 if not messagebox.askyesno("Confirmar", f"¿Eliminar el artículo '{codigo}'?"):
                     return
-                encontrado = eliminar_articulo(codigo)
+                try:
+                    encontrado = eliminar_articulo(codigo)
+                except sqlite3.IntegrityError:
+                    messagebox.showerror(
+                        "Error",
+                        "No se puede eliminar: el artículo tiene ventas registradas.",
+                    )
+                    return
                 ventana.destroy()
                 if encontrado:
                     messagebox.showinfo("Éxito", "Artículo eliminado.")
@@ -518,6 +755,397 @@ def iniciar_interfaz():
                 self.mostrar_articulos(datos, con_id=False)
 
             ctk.CTkButton(ventana, text="Filtrar", command=confirmar).pack(pady=10)
+
+        # ==========================================================
+        # NUEVOS MÓDULOS: Vendedores, Clientes y Ventas
+        # ==========================================================
+        def _abrir_menu(self, titulo, opciones, alto):
+            """Abre una ventanita con un botón por opción, con el mismo
+            estilo que el menú de Artículos."""
+            ventana = ctk.CTkToplevel(self)
+            ventana.title(titulo)
+            ventana.geometry(f"260x{alto}")
+            ventana.grab_set()
+
+            ctk.CTkLabel(
+                ventana, text=titulo.upper(), font=ctk.CTkFont(size=16, weight="bold")
+            ).pack(pady=(20, 10))
+
+            def ejecutar(funcion):
+                ventana.destroy()
+                funcion()
+
+            for texto, funcion in opciones:
+                ctk.CTkButton(
+                    ventana, text=texto, command=lambda f=funcion: ejecutar(f)
+                ).pack(padx=15, pady=5, fill="x")
+
+        def mostrar_tarjetas(self, textos, mensaje_vacio):
+            """Dibuja una tarjeta por cada texto (para listados sin imagen)."""
+            self.limpiar_area()
+            if not textos:
+                self.mostrar_texto(mensaje_vacio)
+                return
+            for texto in textos:
+                fila = ctk.CTkFrame(self.area_resultados)
+                fila.pack(fill="x", padx=5, pady=6)
+                ctk.CTkLabel(
+                    fila, text=texto, font=ctk.CTkFont(size=14), justify="left", anchor="w",
+                ).pack(fill="x", padx=15, pady=12)
+
+        # ---- Vendedores ----
+        def abrir_menu_vendedores(self):
+            self._abrir_menu(
+                "Vendedores",
+                [
+                    ("Registrar vendedor", self.abrir_registrar_vendedor),
+                    ("Listar vendedores", self.accion_listar_vendedores),
+                ],
+                alto=200,
+            )
+
+        def accion_listar_vendedores(self):
+            textos = [
+                f"[{_id}] Legajo {legajo} - {apellido}, {nombre}\nTurno: {turno}"
+                for _id, legajo, nombre, apellido, turno in listar_vendedores()
+            ]
+            self.mostrar_tarjetas(textos, "No hay vendedores registrados.")
+
+        def abrir_registrar_vendedor(self):
+            ventana = ctk.CTkToplevel(self)
+            ventana.title("Registrar vendedor")
+            ventana.geometry("340x450")
+            ventana.grab_set()
+
+            entry_nombre = ctk.CTkEntry(ventana, placeholder_text="Nombre")
+            entry_nombre.pack(pady=(25, 6))
+            entry_apellido = ctk.CTkEntry(ventana, placeholder_text="Apellido")
+            entry_apellido.pack(pady=6)
+            # Legajo: cuadro de texto que arranca arriba a la izquierda y,
+            # al llegar al borde derecho, baja al renglón siguiente.
+            ctk.CTkLabel(ventana, text="Legajo").pack(pady=(10, 0))
+            casilla_legajo = ctk.CTkTextbox(ventana, width=260, height=80, wrap="char")
+            casilla_legajo.pack(pady=6)
+
+            def leer_legajo():
+                # Enter baja de renglón en pantalla, pero el legajo se
+                # guarda como un solo dato: se descartan saltos de línea
+                # y tabulaciones.
+                texto = casilla_legajo.get("1.0", "end")
+                return texto.replace("\n", "").replace("\t", "")
+
+            ctk.CTkLabel(ventana, text="Turno").pack(pady=(10, 0))
+            combo_turno = ctk.CTkOptionMenu(ventana, values=list(TURNOS_VALIDOS))
+            combo_turno.pack(pady=5)
+
+            def confirmar():
+                try:
+                    registrar_vendedor(
+                        leer_legajo(), entry_nombre.get(),
+                        entry_apellido.get(), combo_turno.get(),
+                    )
+                    messagebox.showinfo("Éxito", "Vendedor registrado correctamente.")
+                    ventana.destroy()
+                    self.accion_listar_vendedores()
+                except ValueError as e:
+                    messagebox.showerror("Error de validación", str(e))
+                except sqlite3.IntegrityError:
+                    messagebox.showerror("Error", "Ya existe un vendedor con ese legajo.")
+
+            ctk.CTkButton(ventana, text="Registrar", command=confirmar).pack(pady=20)
+
+        # ---- Ventas y Clientes (unificado) ----
+        def abrir_menu_ventas_clientes(self):
+            self._abrir_menu(
+                "Ventas y clientes",
+                [
+                    ("Nueva venta", self.abrir_nueva_venta_con_cliente),
+                    ("Ver detalle de ventas", self.accion_ver_ventas),
+                    ("Listar clientes", self.accion_listar_clientes),
+                ],
+                alto=240,
+            )
+
+        def accion_listar_clientes(self):
+            textos = []
+            for _id, dni, nombre, apellido, email, telefono in listar_clientes():
+                contacto = "   |   ".join(x for x in (email, telefono) if x) or "Sin datos de contacto"
+                textos.append(f"[{_id}] {apellido}, {nombre} - DNI {dni}\n{contacto}")
+            self.mostrar_tarjetas(textos, "No hay clientes registrados.")
+
+        def accion_ver_ventas(self):
+            """Muestra cada venta con su encabezado y, debajo, los
+            renglones del detalle (artículo, cantidad, precio, subtotal)."""
+            ventas = listar_ventas()
+            if not ventas:
+                self.mostrar_texto("Todavía no hay ventas registradas.")
+                return
+
+            self.limpiar_area()
+            for id_venta, fecha, cliente, dni, vendedor, legajo, total in ventas:
+                tarjeta = ctk.CTkFrame(self.area_resultados)
+                tarjeta.pack(fill="x", padx=5, pady=6)
+
+                encabezado = (
+                    f"Venta N° {id_venta}   |   {fecha}\n"
+                    f"Cliente: {cliente} (DNI {dni})   |   Vendedor: {vendedor} (legajo {legajo})"
+                )
+                ctk.CTkLabel(
+                    tarjeta, text=encabezado, font=ctk.CTkFont(size=14, weight="bold"),
+                    justify="left", anchor="w",
+                ).pack(fill="x", padx=15, pady=(12, 6))
+
+                renglones = [
+                    f"•  {codigo} - {titulo}:  {cantidad} x $ {precio:.2f}  =  $ {subtotal:.2f}"
+                    for codigo, titulo, cantidad, precio, subtotal in obtener_detalle_venta(id_venta)
+                ]
+                ctk.CTkLabel(
+                    tarjeta, text="\n".join(renglones), font=ctk.CTkFont(size=13),
+                    justify="left", anchor="w",
+                ).pack(fill="x", padx=25)
+
+                ctk.CTkLabel(
+                    tarjeta, text=f"TOTAL: $ {total:.2f}",
+                    font=ctk.CTkFont(size=14, weight="bold"), anchor="e",
+                ).pack(fill="x", padx=15, pady=(6, 12))
+
+        def abrir_nueva_venta_con_cliente(self):
+            """Pantalla única que reemplaza a los antiguos formularios
+            separados de 'Registrar cliente' y 'Realizar venta'. De un
+            lado se eligen los artículos a comprar (con buscador y
+            carrito) y del otro se cargan los datos del cliente, para
+            hacer todo el proceso de una sola vez. Si el DNI ingresado
+            ya existe, se reutiliza ese cliente en lugar de duplicarlo."""
+            vendedores = listar_vendedores()
+            articulos = listar_articulos()
+            if not vendedores:
+                messagebox.showwarning("Aviso", "Primero registrá al menos un vendedor.")
+                return
+            if not articulos:
+                messagebox.showwarning("Aviso", "No hay artículos cargados para vender.")
+                return
+
+            ventana = ctk.CTkToplevel(self)
+            ventana.title("Nueva venta")
+            ventana.geometry("900x680")
+            ventana.grab_set()
+            ventana.grid_columnconfigure(0, weight=1)
+            ventana.grid_columnconfigure(1, weight=1)
+            ventana.grid_rowconfigure(1, weight=1)
+
+            ctk.CTkLabel(
+                ventana, text="NUEVA VENTA", font=ctk.CTkFont(size=18, weight="bold")
+            ).grid(row=0, column=0, columnspan=2, pady=(15, 5))
+
+            # ================= Columna izquierda: artículos =================
+            columna_articulos = ctk.CTkFrame(ventana)
+            columna_articulos.grid(row=1, column=0, sticky="nsew", padx=(15, 8), pady=10)
+            columna_articulos.grid_rowconfigure(2, weight=1)
+            columna_articulos.grid_columnconfigure(0, weight=1)
+
+            ctk.CTkLabel(
+                columna_articulos, text="¿Qué artículos comprás?",
+                font=ctk.CTkFont(size=15, weight="bold"),
+            ).grid(row=0, column=0, pady=(10, 5), padx=10, sticky="w")
+
+            entry_busqueda = ctk.CTkEntry(
+                columna_articulos, placeholder_text="Buscar por código o título..."
+            )
+            entry_busqueda.grid(row=1, column=0, padx=10, pady=(0, 8), sticky="ew")
+
+            lista_articulos = ctk.CTkScrollableFrame(columna_articulos, height=260)
+            lista_articulos.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 8))
+            lista_articulos.grid_columnconfigure(0, weight=1)
+
+            ctk.CTkLabel(
+                columna_articulos, text="Carrito de la venta",
+                font=ctk.CTkFont(size=14, weight="bold"),
+            ).grid(row=3, column=0, pady=(5, 2), padx=10, sticky="w")
+
+            marco_carrito = ctk.CTkScrollableFrame(columna_articulos, height=150)
+            marco_carrito.grid(row=4, column=0, sticky="nsew", padx=10, pady=(0, 5))
+
+            etiqueta_total = ctk.CTkLabel(
+                columna_articulos, text="Total: $ 0.00", font=ctk.CTkFont(size=15, weight="bold")
+            )
+            etiqueta_total.grid(row=5, column=0, pady=(0, 10))
+
+            # ---- Carrito: id_articulo -> datos y cantidad elegida ----
+            carrito = {}
+
+            def redibujar_carrito():
+                for widget in marco_carrito.winfo_children():
+                    widget.destroy()
+                total = 0.0
+                if not carrito:
+                    ctk.CTkLabel(
+                        marco_carrito,
+                        text="El carrito está vacío.\nHacé clic en un artículo para agregarlo.",
+                        justify="left",
+                    ).pack(pady=10)
+                for id_a, d in carrito.items():
+                    subtotal = d["precio"] * d["cantidad"]
+                    total += subtotal
+                    fila = ctk.CTkFrame(marco_carrito)
+                    fila.pack(fill="x", pady=2)
+                    ctk.CTkLabel(
+                        fila,
+                        text=f"{d['codigo']} - {d['nombre']}\n"
+                             f"{d['cantidad']} x $ {d['precio']:.2f} = $ {subtotal:.2f}",
+                        justify="left", anchor="w",
+                    ).pack(side="left", padx=8, pady=4, fill="x", expand=True)
+                    ctk.CTkButton(
+                        fila, text="Quitar", width=60,
+                        command=lambda i=id_a: quitar(i),
+                    ).pack(side="right", padx=8)
+                etiqueta_total.configure(text=f"Total: $ {total:.2f}")
+
+            def quitar(id_articulo):
+                carrito.pop(id_articulo, None)
+                redibujar_carrito()
+
+            def agregar_al_carrito(articulo):
+                id_a, codigo, nombre, precio, stock, _imagen = articulo
+                if stock <= 0:
+                    messagebox.showerror("Sin stock", f"'{nombre}' no tiene stock disponible.")
+                    return
+                ya_en_carrito = carrito[id_a]["cantidad"] if id_a in carrito else 0
+                if ya_en_carrito + 1 > stock:
+                    messagebox.showerror(
+                        "Stock insuficiente",
+                        f"Stock disponible de '{nombre}': {stock}. "
+                        f"Ya tenés {ya_en_carrito} en el carrito.",
+                    )
+                    return
+                if id_a in carrito:
+                    carrito[id_a]["cantidad"] += 1
+                else:
+                    carrito[id_a] = {
+                        "codigo": codigo, "nombre": nombre,
+                        "precio": float(precio), "cantidad": 1,
+                    }
+                redibujar_carrito()
+
+            def redibujar_lista(filtro=""):
+                for widget in lista_articulos.winfo_children():
+                    widget.destroy()
+                filtro = filtro.strip().lower()
+                encontrados = 0
+                for a in articulos:
+                    _id, codigo, nombre, precio, stock, _imagen = a
+                    if filtro and filtro not in codigo.lower() and filtro not in nombre.lower():
+                        continue
+                    encontrados += 1
+                    ctk.CTkButton(
+                        lista_articulos,
+                        text=f"{codigo} - {nombre}\n$ {precio:.2f}   |   Stock: {stock}",
+                        anchor="w", fg_color=("gray80", "gray25"),
+                        hover_color=("gray70", "gray35"), text_color=("black", "white"),
+                        command=lambda art=a: agregar_al_carrito(art),
+                    ).pack(fill="x", pady=3)
+                if encontrados == 0:
+                    ctk.CTkLabel(lista_articulos, text="No hay artículos que coincidan.").pack(pady=10)
+
+            def al_escribir_busqueda(_evento=None):
+                redibujar_lista(entry_busqueda.get())
+
+            entry_busqueda.bind("<KeyRelease>", al_escribir_busqueda)
+
+            # ================= Columna derecha: registro de cliente =================
+            columna_cliente = ctk.CTkFrame(ventana)
+            columna_cliente.grid(row=1, column=1, sticky="nsew", padx=(8, 15), pady=10)
+
+            ctk.CTkLabel(
+                columna_cliente, text="Datos del cliente",
+                font=ctk.CTkFont(size=15, weight="bold"),
+            ).pack(pady=(10, 10))
+
+            entry_dni = ctk.CTkEntry(columna_cliente, placeholder_text="DNI")
+            entry_dni.pack(padx=15, pady=6, fill="x")
+            entry_nombre_cliente = ctk.CTkEntry(columna_cliente, placeholder_text="Nombre")
+            entry_nombre_cliente.pack(padx=15, pady=6, fill="x")
+            entry_apellido_cliente = ctk.CTkEntry(columna_cliente, placeholder_text="Apellido")
+            entry_apellido_cliente.pack(padx=15, pady=6, fill="x")
+            entry_email_cliente = ctk.CTkEntry(columna_cliente, placeholder_text="Email (opcional)")
+            entry_email_cliente.pack(padx=15, pady=6, fill="x")
+            entry_telefono_cliente = ctk.CTkEntry(columna_cliente, placeholder_text="Teléfono (opcional)")
+            entry_telefono_cliente.pack(padx=15, pady=6, fill="x")
+
+            ctk.CTkLabel(
+                columna_cliente,
+                text="Si el DNI ya está registrado,\nse usarán los datos existentes.",
+                font=ctk.CTkFont(size=11), text_color=("gray40", "gray70"), justify="center",
+            ).pack(pady=(4, 14))
+
+            ctk.CTkLabel(columna_cliente, text="Vendedor que atiende").pack(pady=(5, 0))
+            opciones_vendedor = [f"{v[0]} - {v[2]} {v[3]} (legajo {v[1]})" for v in vendedores]
+            combo_vendedor = ctk.CTkOptionMenu(columna_cliente, values=opciones_vendedor)
+            combo_vendedor.pack(padx=15, pady=8, fill="x")
+
+            # ================= Confirmar =================
+            def confirmar():
+                if not carrito:
+                    messagebox.showwarning("Aviso", "El carrito está vacío. Elegí al menos un artículo.")
+                    return
+
+                dni = entry_dni.get()
+                nombre_cliente = entry_nombre_cliente.get()
+                apellido_cliente = entry_apellido_cliente.get()
+                email_cliente = entry_email_cliente.get()
+                telefono_cliente = entry_telefono_cliente.get()
+
+                try:
+                    id_vendedor = int(combo_vendedor.get().split(" - ")[0])
+                except (ValueError, IndexError):
+                    messagebox.showerror("Error", "Elegí un vendedor.")
+                    return
+
+                try:
+                    validar_cliente(
+                        dni, nombre_cliente, apellido_cliente, email_cliente, telefono_cliente
+                    )
+                except ValueError as e:
+                    messagebox.showerror("Error de validación", str(e))
+                    return
+
+                try:
+                    cliente_existente = buscar_cliente_por_dni(dni)
+                    if cliente_existente:
+                        id_cliente = cliente_existente[0]
+                    else:
+                        registrar_cliente(
+                            dni, nombre_cliente, apellido_cliente,
+                            email_cliente, telefono_cliente,
+                        )
+                        id_cliente = buscar_cliente_por_dni(dni)[0]
+                    items = [(id_a, d["cantidad"]) for id_a, d in carrito.items()]
+                    id_venta = registrar_venta(id_cliente, id_vendedor, items)
+                except ValueError as e:
+                    messagebox.showerror("Error de validación", str(e))
+                    return
+                except sqlite3.IntegrityError:
+                    messagebox.showerror(
+                        "Error", "No se pudo registrar la venta (datos inexistentes)."
+                    )
+                    return
+
+                total = sum(d["precio"] * d["cantidad"] for d in carrito.values())
+                messagebox.showinfo(
+                    "Éxito",
+                    f"Venta N° {id_venta} registrada.\n"
+                    f"Cliente: {nombre_cliente} {apellido_cliente}\n"
+                    f"Total: $ {total:.2f}",
+                )
+                ventana.destroy()
+                self.accion_ver_ventas()
+
+            ctk.CTkButton(
+                ventana, text="Confirmar venta", command=confirmar, height=40,
+                font=ctk.CTkFont(size=14, weight="bold"),
+            ).grid(row=2, column=0, columnspan=2, pady=(0, 15))
+
+            redibujar_lista()
+            redibujar_carrito()
 
     app = VentanaPrincipal()
     app.mainloop()
@@ -578,6 +1206,120 @@ class TestImagenes(unittest.TestCase):
     def test_ruta_completa_imagen_inexistente(self):
         self.assertIsNone(ruta_completa_imagen("no_existe.png"))
         self.assertIsNone(ruta_completa_imagen(None))
+
+
+class TestVendedoresYClientes(unittest.TestCase):
+    def test_vendedor_legajo_vacio(self):
+        with self.assertRaises(ValueError):
+            validar_vendedor("  ", "Ana", "Pérez", "mañana")
+
+    def test_vendedor_turno_invalido(self):
+        with self.assertRaises(ValueError):
+            validar_vendedor("V01", "Ana", "Pérez", "madrugada")
+
+    def test_vendedor_valido_no_lanza_error(self):
+        try:
+            validar_vendedor("V01", "Ana", "Pérez", "tarde")
+        except ValueError:
+            self.fail("No debería lanzar error con datos válidos.")
+
+    def test_cliente_dni_vacio(self):
+        with self.assertRaises(ValueError):
+            validar_cliente("", "Juan", "Gómez", "", "")
+
+    def test_cliente_email_invalido(self):
+        with self.assertRaises(ValueError):
+            validar_cliente("30111222", "Juan", "Gómez", "juan.com", "")
+
+    def test_cliente_sin_email_ni_telefono_es_valido(self):
+        try:
+            validar_cliente("30111222", "Juan", "Gómez", "", "")
+        except ValueError:
+            self.fail("El email y el teléfono son opcionales.")
+
+
+class TestVentas(unittest.TestCase):
+    """Usan una base temporal (con las mismas tablas), así que no tocan
+    tienda_comics.db."""
+
+    def setUp(self):
+        global NOMBRE_BASE
+        self._base_original = NOMBRE_BASE
+        self._carpeta = tempfile.TemporaryDirectory()
+        NOMBRE_BASE = os.path.join(self._carpeta.name, "prueba.db")
+        con = sqlite3.connect(NOMBRE_BASE)
+        con.executescript(
+            """
+            CREATE TABLE categorias (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre VARCHAR(50), descripcion VARCHAR(150));
+            CREATE TABLE articulos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, Id_C INTEGER NOT NULL,
+                codigo VARCHAR(50) UNIQUE, nombre_titulo VARCHAR(100),
+                precio DECIMAL(10,2), stock INTEGER NOT NULL DEFAULT 0, imagen VARCHAR(255),
+                FOREIGN KEY (Id_C) REFERENCES categorias(id));
+            CREATE TABLE clientes (id INTEGER PRIMARY KEY AUTOINCREMENT, dni VARCHAR(20) UNIQUE,
+                nombre VARCHAR(50), apellido VARCHAR(50), email VARCHAR(100), telefono VARCHAR(20));
+            CREATE TABLE vendedores (id INTEGER PRIMARY KEY AUTOINCREMENT, legajo VARCHAR(20) UNIQUE,
+                nombre VARCHAR(50), apellido VARCHAR(50),
+                turno VARCHAR(10) CHECK (turno IN ('mañana','tarde','noche')));
+            CREATE TABLE ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, Id_CL INTEGER NOT NULL,
+                Id_V INTEGER NOT NULL, fecha_hora DATETIME, monto_total DECIMAL(10,2),
+                FOREIGN KEY (Id_CL) REFERENCES clientes(id), FOREIGN KEY (Id_V) REFERENCES vendedores(id));
+            CREATE TABLE detalle_ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, Id_VE INTEGER NOT NULL,
+                Id_A INTEGER NOT NULL, cantidad INTEGER NOT NULL, precio_unitario DECIMAL(10,2) NOT NULL,
+                subtotal DECIMAL(10,2) NOT NULL,
+                FOREIGN KEY (Id_VE) REFERENCES ventas(id), FOREIGN KEY (Id_A) REFERENCES articulos(id));
+            INSERT INTO categorias (nombre) VALUES ('Cómics');
+            INSERT INTO articulos (Id_C, codigo, nombre_titulo, precio, stock) VALUES (1, 'A01', 'Watchmen', 1000, 5);
+            INSERT INTO articulos (Id_C, codigo, nombre_titulo, precio, stock) VALUES (1, 'A02', 'Akira', 500, 3);
+            INSERT INTO clientes (dni, nombre, apellido) VALUES ('30111222', 'Juan', 'Gómez');
+            INSERT INTO vendedores (legajo, nombre, apellido, turno) VALUES ('V01', 'Ana', 'Pérez', 'tarde');
+            """
+        )
+        con.commit()
+        con.close()
+
+    def tearDown(self):
+        global NOMBRE_BASE
+        NOMBRE_BASE = self._base_original
+        self._carpeta.cleanup()
+
+    def _stock(self, id_articulo):
+        con = sqlite3.connect(NOMBRE_BASE)
+        stock = con.execute("SELECT stock FROM articulos WHERE id = ?", (id_articulo,)).fetchone()[0]
+        con.close()
+        return stock
+
+    def test_venta_calcula_total_detalle_y_descuenta_stock(self):
+        id_venta = registrar_venta(1, 1, [(1, 2), (2, 1)])  # 2*1000 + 1*500
+        ventas = listar_ventas()
+        self.assertEqual(len(ventas), 1)
+        self.assertEqual(ventas[0][0], id_venta)
+        self.assertEqual(ventas[0][6], 2500)
+        self.assertEqual(len(obtener_detalle_venta(id_venta)), 2)
+        self.assertEqual(self._stock(1), 3)
+        self.assertEqual(self._stock(2), 2)
+
+    def test_stock_insuficiente_deshace_toda_la_venta(self):
+        # El primer renglón alcanza, el segundo no: no debe quedar nada guardado.
+        with self.assertRaises(ValueError):
+            registrar_venta(1, 1, [(1, 2), (2, 99)])
+        self.assertEqual(listar_ventas(), [])
+        self.assertEqual(self._stock(1), 5)
+        self.assertEqual(self._stock(2), 3)
+
+    def test_venta_sin_articulos(self):
+        with self.assertRaises(ValueError):
+            registrar_venta(1, 1, [])
+
+    def test_cantidad_invalida(self):
+        with self.assertRaises(ValueError):
+            registrar_venta(1, 1, [(1, 0)])
+        self.assertEqual(listar_ventas(), [])
+
+    def test_cliente_inexistente(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            registrar_venta(999, 1, [(1, 1)])
+        self.assertEqual(self._stock(1), 5)
 
 
 if __name__ == "__main__":
