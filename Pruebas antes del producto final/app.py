@@ -1,20 +1,4 @@
-"""
-app.py
-Sistema de administración de una tienda de cómics — versión con
-interfaz gráfica (CustomTkinter) sobre base de datos SQLite, con
-soporte para adjuntar una imagen a cada artículo, y con módulos de
-clientes, vendedores y ventas (con su detalle).
-E.E.S.T. N°6 "Chacabuco" - Olimpiadas Institucionales 2026.
 
-Las imágenes que se adjuntan al registrar un artículo se copian a
-la carpeta 'imagenes/' (al lado de este script) y el nombre de ese
-archivo se guarda en la base de datos. Así, la imagen queda
-disponible aunque se cierre y se vuelva a abrir el programa.
-
-Instalar antes de ejecutar:   pip install customtkinter pillow
-Ejecutar la aplicación:       python3 app.py
-Ejecutar los casos de prueba:  python3 app.py test
-"""
 import sys
 import os
 import shutil
@@ -23,10 +7,7 @@ import unittest
 import tempfile
 from datetime import datetime
 
-# Rutas absolutas calculadas a partir de la ubicación de este
-# archivo (no del directorio desde donde se ejecute la terminal),
-# para que el programa siempre encuentre la base y la carpeta de
-# imágenes sin importar cómo se lo invoque.
+
 CARPETA_DEL_SCRIPT = os.path.dirname(os.path.abspath(__file__))
 NOMBRE_BASE = os.path.join(CARPETA_DEL_SCRIPT, "tienda_comics.db")
 CARPETA_IMAGENES = os.path.join(CARPETA_DEL_SCRIPT, "imagenes")
@@ -52,9 +33,6 @@ def _asegurar_columna_imagen(conexion):
         conexion.commit()
 
 
-# ------------------------------------------------------------
-# Validación (control de datos inválidos) — SIN CAMBIOS
-# ------------------------------------------------------------
 def validar_articulo(codigo, nombre, precio, stock):
     if not codigo.strip():
         raise ValueError("El código no puede estar vacío.")
@@ -65,10 +43,6 @@ def validar_articulo(codigo, nombre, precio, stock):
     if stock < 0:
         raise ValueError("El stock no puede ser negativo.")
 
-
-# ------------------------------------------------------------
-# Manejo de imágenes
-# ------------------------------------------------------------
 def guardar_imagen(ruta_origen, codigo):
     """Copia la imagen elegida por el usuario a la carpeta imagenes/,
     con un nombre basado en el código del artículo (para que sea
@@ -92,9 +66,7 @@ def ruta_completa_imagen(nombre_archivo):
     return ruta if os.path.exists(ruta) else None
 
 
-# ------------------------------------------------------------
-# Lógica de negocio (ABM, búsqueda, orden, filtrado)
-# ------------------------------------------------------------
+
 def obtener_categorias():
     conexion = conectar()
     cursor = conexion.cursor()
@@ -108,7 +80,7 @@ def listar_articulos():
     conexion = conectar()
     cursor = conexion.cursor()
     cursor.execute("SELECT id, codigo, nombre_titulo, precio, stock, imagen FROM articulos")
-    datos = cursor.fetchall()  # lista de tuplas: nuestra estructura de datos
+    datos = cursor.fetchall()  
     conexion.close()
     return datos
 
@@ -190,9 +162,6 @@ def filtrar_articulos(categoria):
     return datos
 
 
-# ------------------------------------------------------------
-# RECURSIVIDAD: valor total del inventario — SIN CAMBIOS
-# ------------------------------------------------------------
 def obtener_precios_y_stock():
     conexion = conectar()
     cursor = conexion.cursor()
@@ -204,14 +173,11 @@ def obtener_precios_y_stock():
 
 def calcular_valor_inventario(datos, posicion=0):
     if posicion == len(datos):
-        return 0  # caso base: no quedan artículos por sumar
+        return 0  
     precio, stock = datos[posicion]
     return float(precio) * stock + calcular_valor_inventario(datos, posicion + 1)
 
 
-# ------------------------------------------------------------
-# Vendedores
-# ------------------------------------------------------------
 TURNOS_VALIDOS = ("mañana", "tarde", "noche")
 
 
@@ -249,9 +215,6 @@ def listar_vendedores():
     return datos
 
 
-# ------------------------------------------------------------
-# Clientes (hacen falta para poder registrar una venta)
-# ------------------------------------------------------------
 def validar_cliente(dni, nombre, apellido, email, telefono):
     if not dni.strip():
         raise ValueError("El DNI no puede estar vacío.")
@@ -259,8 +222,6 @@ def validar_cliente(dni, nombre, apellido, email, telefono):
         raise ValueError("El nombre no puede estar vacío.")
     if not apellido.strip():
         raise ValueError("El apellido no puede estar vacío.")
-    # El email y el teléfono son opcionales, pero si se cargan el
-    # email tiene que parecer un email.
     if email.strip() and "@" not in email:
         raise ValueError("El email no es válido.")
 
@@ -304,9 +265,6 @@ def buscar_cliente_por_dni(dni):
     return cliente
 
 
-# ------------------------------------------------------------
-# Ventas y detalle de ventas
-# ------------------------------------------------------------
 def registrar_venta(id_cliente, id_vendedor, items):
     """Registra una venta completa. 'items' es una lista de tuplas
     (id_articulo, cantidad). Todo ocurre dentro de UNA sola
@@ -377,9 +335,9 @@ def listar_ventas():
     cursor.execute(
         """
         SELECT v.id, v.fecha_hora,
-               c.nombre || ' ' || c.apellido, c.dni,
-               ve.nombre || ' ' || ve.apellido, ve.legajo,
-               v.monto_total
+                c.nombre || ' ' || c.apellido, c.dni,
+                ve.nombre || ' ' || ve.apellido, ve.legajo,
+                v.monto_total
         FROM ventas v
         JOIN clientes c ON v.Id_CL = c.id
         JOIN vendedores ve ON v.Id_V = ve.id
@@ -409,9 +367,6 @@ def obtener_detalle_venta(id_venta):
     return datos
 
 
-# ==============================================================
-# INTERFAZ GRÁFICA (CustomTkinter)
-# ==============================================================
 def iniciar_interfaz():
     import customtkinter as ctk
     from tkinter import messagebox, filedialog
@@ -420,10 +375,8 @@ def iniciar_interfaz():
     ctk.set_appearance_mode("dark")
     ctk.set_default_color_theme("blue")
 
-    # Tamaños de las imágenes (en píxeles). Cambiá estos números para
-    # agrandar o achicar las imágenes en toda la aplicación.
-    TAMANO_LISTADO = 160      # imágenes en la lista de artículos
-    TAMANO_VISTA_PREVIA = 200  # vista previa al registrar un artículo
+    TAMANO_LISTADO = 160      
+    TAMANO_VISTA_PREVIA = 200  
 
     def crear_ctkimage(ruta, tamano=(150, 150)):
         """Abre una imagen con PIL y la devuelve lista para usar en
@@ -442,18 +395,15 @@ def iniciar_interfaz():
             self.title("Tienda de Cómics")
             self.geometry("1000x700")
             self.grid_columnconfigure(1, weight=1)
-            self.grid_rowconfigure(0, weight=1)
+            self.grid_rowconfigure(1, weight=1)
 
-            # ---- Barra lateral con las acciones ----
             barra = ctk.CTkFrame(self, width=210, corner_radius=0)
-            barra.grid(row=0, column=0, sticky="nsew")
+            barra.grid(row=0, column=0, rowspan=2, sticky="nsew")
 
             ctk.CTkLabel(
                 barra, text="TIENDA DE\nCÓMICS", font=ctk.CTkFont(size=20, weight="bold")
             ).pack(pady=(25, 20))
 
-            # ---- Barra lateral: un botón por grupo de funciones ----
-            # Cada botón abre su propio menú.
             ctk.CTkButton(
                 barra, text="Artículos", command=self.abrir_menu_articulos
             ).pack(padx=15, pady=6, fill="x")
@@ -463,15 +413,34 @@ def iniciar_interfaz():
             ctk.CTkButton(
                 barra, text="Ventas y Clientes", command=self.abrir_menu_ventas_clientes
             ).pack(padx=15, pady=6, fill="x")
+            ctk.CTkButton(
+                barra, text="Categorías", command=self.accion_categorias
+            ).pack(padx=15, pady=6, fill="x")
 
-            # ---- Área principal: panel de tarjetas (imagen + texto) ----
+            # ---- Barra de búsqueda de artículos, arriba del listado ----
+            marco_busqueda = ctk.CTkFrame(self, fg_color="transparent")
+            marco_busqueda.grid(row=0, column=1, sticky="ew", padx=15, pady=(15, 0))
+            marco_busqueda.grid_columnconfigure(0, weight=1)
+
+            self.entry_busqueda_principal = ctk.CTkEntry(
+                marco_busqueda, placeholder_text="Buscar artículo por código o título..."
+            )
+            self.entry_busqueda_principal.grid(row=0, column=0, sticky="ew")
+            self.entry_busqueda_principal.bind("<KeyRelease>", self.accion_buscar_principal)
+            self.entry_busqueda_principal.bind("<Return>", self.accion_buscar_principal)
+
+            ctk.CTkButton(
+                marco_busqueda, text="Buscar", width=90,
+                command=self.accion_buscar_principal,
+            ).grid(row=0, column=1, padx=(8, 0))
+
             self.area_resultados = ctk.CTkScrollableFrame(self)
-            self.area_resultados.grid(row=0, column=1, sticky="nsew", padx=15, pady=15)
+            self.area_resultados.grid(row=1, column=1, sticky="nsew", padx=15, pady=15)
             self.area_resultados.grid_columnconfigure(0, weight=1)
 
-            self.accion_listar()  # al abrir, muestra el listado inicial
+            self.accion_listar()  
 
-        # ---- Helpers para dibujar en el área principal ----
+        
         def limpiar_area(self):
             for widget in self.area_resultados.winfo_children():
                 widget.destroy()
@@ -508,7 +477,7 @@ def iniciar_interfaz():
                 if ruta:
                     foto = crear_ctkimage(ruta, tamano=(TAMANO_LISTADO, TAMANO_LISTADO))
                     etiqueta_imagen = ctk.CTkLabel(fila, image=foto, text="")
-                    etiqueta_imagen.image = foto  # evita que se pierda la referencia
+                    etiqueta_imagen.image = foto  
                 else:
                     etiqueta_imagen = ctk.CTkLabel(
                         fila, text="Sin\nimagen",
@@ -522,7 +491,6 @@ def iniciar_interfaz():
                     fila, text=texto, font=ctk.CTkFont(size=14), justify="left", anchor="w",
                 ).pack(side="left", padx=10, pady=10, fill="x", expand=True)
 
-        # ---- Menú del grupo "Artículos" ----
         def abrir_menu_articulos(self):
             ventana = ctk.CTkToplevel(self)
             ventana.title("Artículos")
@@ -542,7 +510,6 @@ def iniciar_interfaz():
                 ("Ordenar artículos", self.abrir_ordenar),
                 ("Filtrar por categoría", self.abrir_filtrar),
                 ("Valor del inventario", self.accion_valor_inventario),
-                ("Ver categorías", self.accion_categorias),
             ]
 
             def ejecutar(funcion):
@@ -554,21 +521,65 @@ def iniciar_interfaz():
                     ventana, text=texto, command=lambda f=funcion: ejecutar(f)
                 ).pack(padx=15, pady=5, fill="x")
 
-        # ---- Acciones directas (no necesitan formulario) ----
+      
         def accion_listar(self):
+            self.entry_busqueda_principal.delete(0, "end")
             self.mostrar_articulos(listar_articulos(), con_id=True)
+
+        def accion_buscar_principal(self, _evento=None):
+            """Filtra el listado de artículos de la pantalla de inicio
+            por lo escrito en la barra de búsqueda (código o título).
+            Si la barra está vacía, vuelve a mostrar todo."""
+            texto = self.entry_busqueda_principal.get().strip().lower()
+            if not texto:
+                self.mostrar_articulos(listar_articulos(), con_id=True)
+                return
+            encontrados = [
+                a for a in listar_articulos()
+                if texto in a[1].lower() or texto in a[2].lower()
+            ]
+            self.mostrar_articulos(encontrados, con_id=True)
 
         def accion_categorias(self):
             categorias = obtener_categorias()
-            texto = "\n".join(f"{c[0]} - {c[1]}" for c in categorias)
-            self.mostrar_texto(texto)
+            self.limpiar_area()
+            if not categorias:
+                self.mostrar_texto("No hay categorías para mostrar.")
+                return
 
+            # Tipografía de historieta: si "Comic Sans MS" no está
+            # instalada, CustomTkinter usa la fuente por defecto sin
+            # romper nada.
+            fuente_titulo = ctk.CTkFont(family="Comic Sans MS", size=22, weight="bold")
+
+            for _id, nombre in categorias:
+                tarjeta = ctk.CTkFrame(
+                    self.area_resultados, corner_radius=12,
+                    border_width=3, border_color="#39D2E6",
+                    fg_color=("gray95", "gray17"),
+                )
+                tarjeta.pack(fill="x", padx=5, pady=8)
+
+                # "Viñeta" numerada, como el número de un cómic.
+                ctk.CTkLabel(
+                    tarjeta, text=f"N°{_id}",
+                    font=ctk.CTkFont(family="Comic Sans MS", size=13, weight="bold"),
+                    text_color="#1D1D1D", fg_color="#39D2E6",
+                    corner_radius=8, width=52, height=28,
+                ).pack(side="left", padx=15, pady=12)
+
+                ctk.CTkLabel(
+                    tarjeta, text=nombre.upper(), font=fuente_titulo,
+                    text_color="#8483E7", anchor="w",
+                ).pack(side="left", padx=(5, 15), pady=12, fill="x", expand=True)
+                
+    
         def accion_valor_inventario(self):
             datos = obtener_precios_y_stock()
             total = calcular_valor_inventario(datos)
             self.mostrar_texto(f"Valor total del inventario: $ {round(total, 2)}")
 
-        # ---- Formulario: Registrar (ahora con imagen) ----
+        
         def abrir_registrar(self):
             ventana = ctk.CTkToplevel(self)
             ventana.title("Registrar artículo")
@@ -591,7 +602,7 @@ def iniciar_interfaz():
             entry_stock = ctk.CTkEntry(ventana, placeholder_text="Stock")
             entry_stock.pack(pady=6)
 
-            # ---- Selección de imagen con vista previa ----
+
             imagen_elegida = {"ruta": None}
 
             vista_previa = ctk.CTkLabel(
@@ -610,7 +621,7 @@ def iniciar_interfaz():
                 imagen_elegida["ruta"] = ruta
                 foto = crear_ctkimage(ruta, tamano=(TAMANO_VISTA_PREVIA, TAMANO_VISTA_PREVIA))
                 vista_previa.configure(image=foto, text="")
-                vista_previa.image = foto  # evita que el recolector de basura la borre
+                vista_previa.image = foto  
 
             ctk.CTkButton(ventana, text="Adjuntar imagen", command=elegir_imagen).pack(pady=5)
 
@@ -638,7 +649,7 @@ def iniciar_interfaz():
 
             ctk.CTkButton(ventana, text="Registrar", command=confirmar).pack(pady=15)
 
-        # ---- Formulario: Buscar (muestra detalle con imagen) ----
+
         def abrir_buscar(self):
             ventana = ctk.CTkToplevel(self)
             ventana.title("Buscar artículo")
@@ -658,7 +669,7 @@ def iniciar_interfaz():
 
             ctk.CTkButton(ventana, text="Buscar", command=confirmar).pack(pady=10)
 
-        # ---- Formulario: Modificar ----
+        
         def abrir_modificar(self):
             ventana = ctk.CTkToplevel(self)
             ventana.title("Modificar artículo")
@@ -688,7 +699,7 @@ def iniciar_interfaz():
 
             ctk.CTkButton(ventana, text="Modificar", command=confirmar).pack(pady=15)
 
-        # ---- Formulario: Eliminar ----
+    
         def abrir_eliminar(self):
             ventana = ctk.CTkToplevel(self)
             ventana.title("Eliminar artículo")
@@ -719,7 +730,7 @@ def iniciar_interfaz():
 
             ctk.CTkButton(ventana, text="Eliminar", command=confirmar).pack(pady=10)
 
-        # ---- Formulario: Ordenar ----
+
         def abrir_ordenar(self):
             ventana = ctk.CTkToplevel(self)
             ventana.title("Ordenar artículos")
@@ -738,7 +749,7 @@ def iniciar_interfaz():
 
             ctk.CTkButton(ventana, text="Aplicar", command=confirmar).pack(pady=10)
 
-        # ---- Formulario: Filtrar ----
+
         def abrir_filtrar(self):
             ventana = ctk.CTkToplevel(self)
             ventana.title("Filtrar por categoría")
@@ -756,9 +767,7 @@ def iniciar_interfaz():
 
             ctk.CTkButton(ventana, text="Filtrar", command=confirmar).pack(pady=10)
 
-        # ==========================================================
-        # NUEVOS MÓDULOS: Vendedores, Clientes y Ventas
-        # ==========================================================
+
         def _abrir_menu(self, titulo, opciones, alto):
             """Abre una ventanita con un botón por opción, con el mismo
             estilo que el menú de Artículos."""
@@ -793,7 +802,7 @@ def iniciar_interfaz():
                     fila, text=texto, font=ctk.CTkFont(size=14), justify="left", anchor="w",
                 ).pack(fill="x", padx=15, pady=12)
 
-        # ---- Vendedores ----
+
         def abrir_menu_vendedores(self):
             self._abrir_menu(
                 "Vendedores",
@@ -821,16 +830,11 @@ def iniciar_interfaz():
             entry_nombre.pack(pady=(25, 6))
             entry_apellido = ctk.CTkEntry(ventana, placeholder_text="Apellido")
             entry_apellido.pack(pady=6)
-            # Legajo: cuadro de texto que arranca arriba a la izquierda y,
-            # al llegar al borde derecho, baja al renglón siguiente.
             ctk.CTkLabel(ventana, text="Legajo").pack(pady=(10, 0))
             casilla_legajo = ctk.CTkTextbox(ventana, width=260, height=80, wrap="char")
             casilla_legajo.pack(pady=6)
 
             def leer_legajo():
-                # Enter baja de renglón en pantalla, pero el legajo se
-                # guarda como un solo dato: se descartan saltos de línea
-                # y tabulaciones.
                 texto = casilla_legajo.get("1.0", "end")
                 return texto.replace("\n", "").replace("\t", "")
 
@@ -854,7 +858,7 @@ def iniciar_interfaz():
 
             ctk.CTkButton(ventana, text="Registrar", command=confirmar).pack(pady=20)
 
-        # ---- Ventas y Clientes (unificado) ----
+
         def abrir_menu_ventas_clientes(self):
             self._abrir_menu(
                 "Ventas y clientes",
@@ -937,7 +941,7 @@ def iniciar_interfaz():
                 ventana, text="NUEVA VENTA", font=ctk.CTkFont(size=18, weight="bold")
             ).grid(row=0, column=0, columnspan=2, pady=(15, 5))
 
-            # ================= Columna izquierda: artículos =================
+
             columna_articulos = ctk.CTkFrame(ventana)
             columna_articulos.grid(row=1, column=0, sticky="nsew", padx=(15, 8), pady=10)
             columna_articulos.grid_rowconfigure(2, weight=1)
@@ -970,7 +974,6 @@ def iniciar_interfaz():
             )
             etiqueta_total.grid(row=5, column=0, pady=(0, 10))
 
-            # ---- Carrito: id_articulo -> datos y cantidad elegida ----
             carrito = {}
 
             def redibujar_carrito():
@@ -1014,7 +1017,7 @@ def iniciar_interfaz():
                     messagebox.showerror(
                         "Stock insuficiente",
                         f"Stock disponible de '{nombre}': {stock}. "
-                        f"Ya tenés {ya_en_carrito} en el carrito.",
+                        f"{ya_en_carrito} ya esta en el carrito.",
                     )
                     return
                 if id_a in carrito:
@@ -1050,8 +1053,12 @@ def iniciar_interfaz():
                 redibujar_lista(entry_busqueda.get())
 
             entry_busqueda.bind("<KeyRelease>", al_escribir_busqueda)
+            # Al presionar Enter también se aplica la búsqueda (por si
+            # el usuario prefiere escribir todo y confirmar con Enter
+            # en lugar de ver el filtro mientras tipea).
+            entry_busqueda.bind("<Return>", al_escribir_busqueda)
 
-            # ================= Columna derecha: registro de cliente =================
+
             columna_cliente = ctk.CTkFrame(ventana)
             columna_cliente.grid(row=1, column=1, sticky="nsew", padx=(8, 15), pady=10)
 
@@ -1082,7 +1089,7 @@ def iniciar_interfaz():
             combo_vendedor = ctk.CTkOptionMenu(columna_cliente, values=opciones_vendedor)
             combo_vendedor.pack(padx=15, pady=8, fill="x")
 
-            # ================= Confirmar =================
+
             def confirmar():
                 if not carrito:
                     messagebox.showwarning("Aviso", "El carrito está vacío. Elegí al menos un artículo.")
@@ -1180,15 +1187,12 @@ class TestRecursividad(unittest.TestCase):
 
     def test_valor_inventario_varios_articulos(self):
         datos = [(1800, 25), (1200, 40), (1500, 20)]
-        # 1800*25 + 1200*40 + 1500*20 = 45000 + 48000 + 30000 = 123000
         self.assertEqual(calcular_valor_inventario(datos), 123000)
 
 
 class TestImagenes(unittest.TestCase):
     def test_guardar_y_recuperar_imagen(self):
         with tempfile.TemporaryDirectory() as carpeta_temporal:
-            # Creamos un archivo "imagen" de prueba (no hace falta que
-            # sea una imagen real para probar la copia de archivos).
             origen = os.path.join(carpeta_temporal, "prueba.png")
             with open(origen, "wb") as f:
                 f.write(b"contenido de prueba")
@@ -1200,7 +1204,7 @@ class TestImagenes(unittest.TestCase):
             self.assertIsNotNone(ruta)
             self.assertTrue(os.path.exists(ruta))
 
-            # Limpieza: borramos el archivo copiado a imagenes/
+
             os.remove(ruta)
 
     def test_ruta_completa_imagen_inexistente(self):
@@ -1290,7 +1294,7 @@ class TestVentas(unittest.TestCase):
         return stock
 
     def test_venta_calcula_total_detalle_y_descuenta_stock(self):
-        id_venta = registrar_venta(1, 1, [(1, 2), (2, 1)])  # 2*1000 + 1*500
+        id_venta = registrar_venta(1, 1, [(1, 2), (2, 1)])
         ventas = listar_ventas()
         self.assertEqual(len(ventas), 1)
         self.assertEqual(ventas[0][0], id_venta)
@@ -1300,7 +1304,6 @@ class TestVentas(unittest.TestCase):
         self.assertEqual(self._stock(2), 2)
 
     def test_stock_insuficiente_deshace_toda_la_venta(self):
-        # El primer renglón alcanza, el segundo no: no debe quedar nada guardado.
         with self.assertRaises(ValueError):
             registrar_venta(1, 1, [(1, 2), (2, 99)])
         self.assertEqual(listar_ventas(), [])
@@ -1328,3 +1331,27 @@ if __name__ == "__main__":
         unittest.main(verbosity=2)
     else:
         iniciar_interfaz()
+
+def barra_de_busqueda():
+    """Crea una barra de búsqueda con un botón de búsqueda y un botón de limpiar."""
+    ventana = ctk.CTk()
+    ventana.title("Barra de búsqueda")
+    ventana.geometry("400x100")
+
+    entry_busqueda = ctk.CTkEntry(ventana, placeholder_text="Buscar...")
+    entry_busqueda.pack(pady=10, padx=10, fill="x")
+
+    def buscar():
+        termino = entry_busqueda.get()
+        messagebox.showinfo("Búsqueda", f"Buscando: {termino}")
+
+    def limpiar():
+        entry_busqueda.delete(0, "end")
+
+    frame_botones = ctk.CTkFrame(ventana)
+    frame_botones.pack(pady=5)
+
+    ctk.CTkButton(frame_botones, text="Buscar", command=buscar).pack(side="left", padx=5)
+    ctk.CTkButton(frame_botones, text="Limpiar", command=limpiar).pack(side="left", padx=5)
+
+    ventana.mainloop()
